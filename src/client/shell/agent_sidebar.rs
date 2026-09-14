@@ -97,12 +97,13 @@ pub(super) fn render_agent_panel_header(
     if area.height == 0 {
         return false;
     }
+    let rule_width = area.width.saturating_sub(2);
     put_text(
         buffer,
-        area.x,
+        area.x.saturating_add(1),
         area.y,
-        area.width,
-        &"─".repeat(area.width as usize),
+        rule_width,
+        &"─".repeat(rule_width as usize),
         Style::default().fg(config.palette.surface_dim),
     );
     if area.height < 2 {
@@ -110,10 +111,10 @@ pub(super) fn render_agent_panel_header(
     }
     put_text(
         buffer,
-        area.x,
+        area.x.saturating_add(2),
         area.y + 1,
-        area.width,
-        " agents",
+        area.width.saturating_sub(2),
+        "AGENTS",
         Style::default()
             .fg(config.palette.overlay0)
             .add_modifier(Modifier::BOLD),
@@ -122,32 +123,32 @@ pub(super) fn render_agent_panel_header(
         crate::config::AgentPanelSortConfig::Spaces => "grouped",
         crate::config::AgentPanelSortConfig::Priority => "priority",
     });
-    let sort_width = display_width(sort_label).min(area.width as usize) as u16;
-    let sort_rect = Rect::new(
-        area.right().saturating_sub(sort_width),
+    let padded_label = format!(" {sort_label} ");
+    let pill_label = if area.width >= super::render::pill_width(&padded_label) + 10 {
+        padded_label.as_str()
+    } else {
+        sort_label
+    };
+    let sort_rect = super::render::put_pill(
+        buffer,
+        area.right()
+            .saturating_sub(1)
+            .saturating_sub(super::render::pill_width(pill_label)),
         area.y + 1,
-        sort_width,
-        1,
+        pill_label,
+        Style::default().fg(if agent_view_label.is_some() {
+            config.palette.accent
+        } else {
+            config.palette.overlay1
+        }),
+        config.palette.surface0,
+        config.palette.sidebar_bg,
     );
     hits.agent_sort_toggle = if config.mouse_capture && agent_view_label.is_none() {
         sort_rect
     } else {
         Rect::default()
     };
-    put_text(
-        buffer,
-        sort_rect.x,
-        sort_rect.y,
-        sort_rect.width,
-        sort_label,
-        Style::default()
-            .fg(if agent_view_label.is_some() {
-                config.palette.accent
-            } else {
-                config.palette.overlay0
-            })
-            .add_modifier(Modifier::BOLD),
-    );
     true
 }
 
@@ -355,7 +356,7 @@ pub(super) fn render_agent_row(
         row.rows.clone()
     };
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
-        let indent = if index == 0 { 1 } else { 3 };
+        let indent = if index == 0 { 2 } else { 4 };
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
         spans.extend(crate::ui::resolved_token_spans(
             tokens,
@@ -367,10 +368,20 @@ pub(super) fn render_agent_row(
             palette,
             rect.width.saturating_sub(indent as u16) as usize,
         ));
-        Paragraph::new(Line::from(spans)).style(row_style).render(
-            Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
-            buffer,
-        );
+        let line = Rect::new(rect.x, rect.y + index as u16, rect.width, 1);
+        Paragraph::new(Line::from(spans))
+            .style(row_style)
+            .render(line, buffer);
+        if row.focused {
+            put_text(
+                buffer,
+                line.x,
+                line.y,
+                1,
+                super::render::ACTIVE_ROW_BAR,
+                row_style.fg(palette.accent),
+            );
+        }
     }
 }
 
@@ -380,10 +391,6 @@ fn put_text(buffer: &mut Buffer, x: u16, y: u16, width: u16, text: &str, style: 
             cell.set_char(character).set_style(style);
         }
     }
-}
-
-fn display_width(text: &str) -> usize {
-    unicode_width::UnicodeWidthStr::width(text)
 }
 
 fn sidebar_status_text(status: crate::api::schema::AgentStatus) -> &'static str {

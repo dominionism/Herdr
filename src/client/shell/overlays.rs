@@ -107,7 +107,15 @@ pub(crate) fn render_global_menu(
         .right()
         .saturating_sub(width)
         .min(screen.right().saturating_sub(width));
-    let y = launcher.y.saturating_sub(height).max(screen.y);
+    // Open above the launcher when it fits, otherwise drop below it.
+    let y = if launcher.y >= screen.y.saturating_add(height) {
+        launcher.y - height
+    } else {
+        launcher
+            .bottom()
+            .min(screen.bottom().saturating_sub(height))
+            .max(screen.y)
+    };
     let inner = panel(
         buffer,
         Rect::new(x, y, width, height),

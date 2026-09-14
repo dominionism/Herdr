@@ -4,6 +4,11 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
+/// Rows above the sidebar content: the toolbar row plus a spacer.
+const SIDEBAR_TOP_BAR_ROWS: u16 = 2;
+/// Rows used by the "SPACES" label plus a spacer.
+const SPACES_HEADER_ROWS: u16 = 2;
+
 pub(in crate::client::shell) fn collapsed_sidebar_sections(
     area: Rect,
 ) -> (Rect, Option<u16>, Rect) {
@@ -34,7 +39,14 @@ pub(crate) fn render_collapsed_sidebar(
 ) {
     let palette = &config.palette;
     render_sidebar_background(buffer, area, palette);
-    let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area);
+    // The expand button owns the top row, so the rail content starts below a spacer.
+    let rail = Rect::new(
+        area.x,
+        area.y.saturating_add(SIDEBAR_TOP_BAR_ROWS),
+        area.width,
+        area.height.saturating_sub(SIDEBAR_TOP_BAR_ROWS),
+    );
+    let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(rail);
     for (index, workspace) in snapshot
         .workspaces
         .iter()
@@ -154,30 +166,27 @@ pub(crate) fn render_collapsed_sidebar(
         );
         hits.agents.push((rect, pane_id));
     }
-    hits.sidebar_toggle = if area.is_empty() || workspace_area.width == 0 {
-        Rect::default()
+    let toggle_style = if super::super::global_menu::global_menu_attention(snapshot) {
+        Style::default()
+            .fg(palette.accent)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Rect::new(
-            workspace_area.x + workspace_area.width / 2,
-            area.bottom().saturating_sub(1),
-            1,
-            1,
-        )
+        Style::default().fg(palette.subtext0)
     };
-    put_text(
-        buffer,
-        hits.sidebar_toggle.x,
-        hits.sidebar_toggle.y,
-        hits.sidebar_toggle.width,
-        "»",
-        if super::super::global_menu::global_menu_attention(snapshot) {
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD)
+    hits.sidebar_toggle =
+        if area.is_empty() || area.width.saturating_sub(1) < pill_width(ICON_SIDEBAR_COLLAPSED) {
+            Rect::default()
         } else {
-            Style::default().fg(palette.overlay0)
-        },
-    );
+            put_pill(
+                buffer,
+                area.x,
+                area.y,
+                ICON_SIDEBAR_COLLAPSED,
+                toggle_style,
+                palette.surface1,
+                palette.sidebar_bg,
+            )
+        };
 }
 
 pub(crate) fn render_sidebar(
@@ -199,25 +208,68 @@ pub(crate) fn render_sidebar(
         crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+
+    // Toolbar: sidebar toggle on the left, global menu on the right.
+    let button_style = Style::default().fg(palette.subtext0);
+    let buttons_right = workspace_area.right().saturating_sub(1);
+    hits.sidebar_toggle = put_pill(
+        buffer,
+        workspace_area.x.saturating_add(1),
+        workspace_area.y,
+        ICON_SIDEBAR_EXPANDED,
+        button_style,
+        palette.surface1,
+        palette.sidebar_bg,
+    );
+    if config.mouse_capture {
+        let menu_style = if super::super::global_menu::global_menu_attention(snapshot) {
+            Style::default()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            button_style
+        };
+        hits.global_launcher = put_pill(
+            buffer,
+            buttons_right.saturating_sub(pill_width(ICON_MENU)),
+            workspace_area.y,
+            ICON_MENU,
+            menu_style,
+            palette.surface1,
+            palette.sidebar_bg,
+        );
+    }
+
+    let header_y = workspace_area.y.saturating_add(SIDEBAR_TOP_BAR_ROWS);
     put_text(
         buffer,
-        workspace_area.x,
-        workspace_area.y,
-        workspace_area.width,
-        " spaces",
+        workspace_area.x.saturating_add(2),
+        header_y,
+        workspace_area.width.saturating_sub(2),
+        "SPACES",
         Style::default()
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
+    if config.mouse_capture {
+        hits.new_workspace = put_pill(
+            buffer,
+            buttons_right.saturating_sub(pill_width(ICON_PLUS)),
+            header_y,
+            ICON_PLUS,
+            button_style,
+            palette.surface1,
+            palette.sidebar_bg,
+        );
+    }
 
     let entries = workspace_entries(snapshot, state.collapsed_groups);
+    let body_top = SIDEBAR_TOP_BAR_ROWS + SPACES_HEADER_ROWS;
     let body = Rect::new(
         workspace_area.x,
-        workspace_area.y.saturating_add(WORKSPACE_HEADER_ROWS),
+        workspace_area.y.saturating_add(body_top),
         workspace_area.width,
-        workspace_area
-            .height
-            .saturating_sub(WORKSPACE_HEADER_ROWS + 1),
+        workspace_area.height.saturating_sub(body_top),
     );
     hits.workspace_body = body;
     let row_heights = entries
@@ -365,61 +417,6 @@ pub(crate) fn render_sidebar(
         );
     }
 
-    let footer_y = workspace_area.bottom().saturating_sub(1);
-    if config.mouse_capture {
-        hits.new_workspace = Rect::new(
-            workspace_area.x,
-            footer_y,
-            5.min(workspace_area.width),
-            u16::from(workspace_area.height > 0),
-        );
-        put_text(
-            buffer,
-            workspace_area.x,
-            footer_y,
-            workspace_area.width,
-            " new",
-            Style::default().fg(palette.overlay0),
-        );
-        let attention = super::super::global_menu::global_menu_attention(snapshot);
-        let launcher_width = if attention { 8 } else { 6 }.min(workspace_area.width);
-        hits.global_launcher = Rect::new(
-            workspace_area.right().saturating_sub(launcher_width),
-            footer_y,
-            launcher_width,
-            1,
-        );
-        if attention {
-            let start_x = workspace_area.right().saturating_sub(6);
-            put_text(
-                buffer,
-                start_x,
-                footer_y,
-                2,
-                "● ",
-                Style::default()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
-            );
-            put_text(
-                buffer,
-                start_x.saturating_add(2),
-                footer_y,
-                4,
-                "menu",
-                Style::default().fg(palette.overlay0),
-            );
-        } else {
-            put_right_text(
-                buffer,
-                workspace_area,
-                footer_y,
-                "menu",
-                Style::default().fg(palette.overlay0),
-            );
-        }
-    }
-
     super::render_agent_panel(
         buffer,
         detail_area,
@@ -427,21 +424,6 @@ pub(crate) fn render_sidebar(
         config,
         state.agent_scroll,
         hits,
-    );
-
-    hits.sidebar_toggle = Rect::new(
-        area.right().saturating_sub(2),
-        area.bottom().saturating_sub(1),
-        u16::from(area.width > 1),
-        u16::from(area.height > 0),
-    );
-    put_text(
-        buffer,
-        hits.sidebar_toggle.x,
-        hits.sidebar_toggle.y,
-        hits.sidebar_toggle.width,
-        "«",
-        Style::default().fg(palette.overlay0),
     );
 }
 
@@ -652,9 +634,9 @@ pub(in crate::client::shell) fn render_workspace_rows(
                 Style::default().fg(palette.overlay0),
             );
         } else if row_index == 0 {
-            x = x.saturating_add(1);
+            x = x.saturating_add(2);
         } else {
-            x = x.saturating_add(3);
+            x = x.saturating_add(4);
         }
         let highlighted = endpoint_active && workspace.focused || dragged;
         let workspace_style = Style::default()
@@ -707,6 +689,16 @@ pub(in crate::client::shell) fn render_workspace_rows(
         for y in area.y..area.bottom() {
             for x in area.x..area.right() {
                 buffer[(x, y)].set_bg(background);
+            }
+        }
+        if !dragged {
+            let bar = if endpoint_active && workspace.focused {
+                palette.accent
+            } else {
+                palette.overlay1
+            };
+            for y in area.y..area.bottom() {
+                buffer[(area.x, y)].set_symbol(ACTIVE_ROW_BAR).set_fg(bar);
             }
         }
     }

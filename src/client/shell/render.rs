@@ -351,3 +351,38 @@ pub(super) fn put_text(buffer: &mut Buffer, x: u16, y: u16, width: u16, text: &s
 pub(super) fn display_width(text: &str) -> u16 {
     UnicodeWidthStr::width(text).min(u16::MAX as usize) as u16
 }
+
+// Nerd Font glyphs used by the sidebar's rounded buttons and active-row marker.
+pub(in crate::client::shell) const PILL_CAP_LEFT: &str = "\u{e0b6}";
+pub(in crate::client::shell) const PILL_CAP_RIGHT: &str = "\u{e0b4}";
+pub(in crate::client::shell) const ICON_SIDEBAR_EXPANDED: &str = "\u{ebf3}";
+pub(in crate::client::shell) const ICON_SIDEBAR_COLLAPSED: &str = "\u{ec02}";
+pub(in crate::client::shell) const ICON_MENU: &str = "\u{f0c9}";
+pub(in crate::client::shell) const ICON_PLUS: &str = "\u{f067}";
+pub(in crate::client::shell) const ACTIVE_ROW_BAR: &str = "\u{258e}";
+
+/// Width of a rounded button around `label`, caps included.
+pub(in crate::client::shell) fn pill_width(label: &str) -> u16 {
+    display_width(label).saturating_add(2)
+}
+
+/// Draws `label` as a rounded button and returns its clickable area.
+pub(in crate::client::shell) fn put_pill(
+    buffer: &mut Buffer,
+    x: u16,
+    y: u16,
+    label: &str,
+    style: Style,
+    fill: ratatui::style::Color,
+    outer: ratatui::style::Color,
+) -> Rect {
+    let width = pill_width(label);
+    if x.saturating_add(width) > buffer.area.right() || y >= buffer.area.bottom() {
+        return Rect::default();
+    }
+    let cap = Style::default().fg(fill).bg(outer);
+    put_text(buffer, x, y, 1, PILL_CAP_LEFT, cap);
+    put_text(buffer, x + 1, y, width - 2, label, style.bg(fill));
+    put_text(buffer, x + width - 1, y, 1, PILL_CAP_RIGHT, cap);
+    Rect::new(x, y, width, 1)
+}
