@@ -1,0 +1,10 @@
+#!/bin/sh
+# Zig 0.15.2 cannot read the macOS 26 SDK stubs; hand it an older SDK instead.
+sdk="${HERDR_XCRUN_SDK:-/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk}"
+for arg in "$@"; do
+  case "$arg" in
+    --show-sdk-path) echo "$sdk"; exit 0 ;;
+    --show-sdk-version|--show-sdk-platform-version) basename "$sdk" .sdk | sed 's/^MacOSX//'; exit 0 ;;
+  esac
+done
+exec /usr/bin/xcrun "$@"
