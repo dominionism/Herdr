@@ -329,7 +329,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # "workspaces" is accepted as an alias for "spaces".
 # agent_panel_sort = "spaces"
 
-# Agent status indicators: "dots" preserves the compact color marks; "symbols" uses
+# Agent status indicators: "dots" draws Nerd Font state icons in this build; "symbols" uses
 # distinct static glyphs for blocked, working, done, idle, and unknown states.
 # status_indicators = "dots"
 

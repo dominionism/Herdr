@@ -198,12 +198,12 @@ fn status_icon(
     use crate::api::schema::AgentStatus;
     use crate::config::StatusIndicatorStyle;
     match (style, status) {
-        (
-            StatusIndicatorStyle::Dots,
-            AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done,
-        ) => "●",
-        (StatusIndicatorStyle::Dots, AgentStatus::Idle) => "○",
-        (StatusIndicatorStyle::Dots, AgentStatus::Unknown) => "·",
+        // This build draws Nerd Font state icons for the default "dots" style.
+        (StatusIndicatorStyle::Dots, AgentStatus::Working) => "\u{f1ce}",
+        (StatusIndicatorStyle::Dots, AgentStatus::Blocked) => "\u{f06a}",
+        (StatusIndicatorStyle::Dots, AgentStatus::Done) => "\u{f058}",
+        (StatusIndicatorStyle::Dots, AgentStatus::Idle) => "\u{eba4}",
+        (StatusIndicatorStyle::Dots, AgentStatus::Unknown) => "\u{f489}",
         (StatusIndicatorStyle::Symbols, AgentStatus::Blocked) => "×",
         (StatusIndicatorStyle::Symbols, AgentStatus::Working) => "◐",
         (StatusIndicatorStyle::Symbols, AgentStatus::Done) => "✓",
@@ -213,7 +213,12 @@ fn status_icon(
 }
 
 fn status_dot(status: crate::api::schema::AgentStatus) -> &'static str {
-    status_icon(status, crate::config::StatusIndicatorStyle::Dots)
+    use crate::api::schema::AgentStatus;
+    match status {
+        AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done => "●",
+        AgentStatus::Idle => "○",
+        AgentStatus::Unknown => "·",
+    }
 }
 
 fn status_priority(status: crate::api::schema::AgentStatus) -> u8 {
