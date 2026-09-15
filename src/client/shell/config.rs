@@ -360,7 +360,8 @@ impl ClientShellConfig {
 
         let sidebar_width = if sidebar_collapsed {
             match self.sidebar_collapsed_mode {
-                SidebarCollapsedModeConfig::Compact => 4,
+                // Fits the expand button at the same size and position as when expanded.
+                SidebarCollapsedModeConfig::Compact => 2 + super::render::ICON_BUTTON_WIDTH + 1,
                 SidebarCollapsedModeConfig::Hidden => 0,
             }
         } else {

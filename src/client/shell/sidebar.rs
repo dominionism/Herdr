@@ -4,10 +4,9 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-/// Rows above the sidebar content: the toolbar row plus a spacer.
-const SIDEBAR_TOP_BAR_ROWS: u16 = 2;
-/// Rows used by the "SPACES" label plus a spacer.
-const SPACES_HEADER_ROWS: u16 = 2;
+/// Rows above the space list: the top bar, the SPACES header, a spacer, and the
+/// row the focused entry's border draws into.
+const SPACES_LIST_TOP: u16 = 2 * BUTTON_HEIGHT + 2;
 
 pub(in crate::client::shell) fn collapsed_sidebar_sections(
     area: Rect,
@@ -29,143 +28,17 @@ pub(in crate::client::shell) fn collapsed_sidebar_sections(
     )
 }
 
+/// The collapsed sidebar shows only the expand button, at the same size and
+/// position as the collapse button in the expanded sidebar.
 pub(crate) fn render_collapsed_sidebar(
     buffer: &mut Buffer,
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
-    selected_workspace_id: Option<&str>,
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
     render_sidebar_background(buffer, area, palette);
-    // The expand button owns the top row, so the rail content starts below a spacer.
-    let rail = Rect::new(
-        area.x,
-        area.y.saturating_add(SIDEBAR_TOP_BAR_ROWS),
-        area.width,
-        area.height.saturating_sub(SIDEBAR_TOP_BAR_ROWS),
-    );
-    let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(rail);
-    for (index, workspace) in snapshot
-        .workspaces
-        .iter()
-        .take(workspace_area.height as usize)
-        .enumerate()
-    {
-        let rect = Rect::new(
-            workspace_area.x,
-            workspace_area.y + index as u16,
-            workspace_area.width,
-            1,
-        );
-        let selected = selected_workspace_id == Some(workspace.workspace_id.as_str());
-        let selection_background =
-            if workspace.focused && palette.selection_bg == ratatui::style::Color::Reset {
-                palette.active_row_bg
-            } else {
-                palette.selection_bg
-            };
-        if selected {
-            buffer.set_style(rect, Style::default().bg(selection_background));
-        } else if workspace.focused {
-            buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
-        }
-        let number_style = if selected {
-            Style::default()
-                .fg(palette.overlay1)
-                .bg(selection_background)
-        } else if workspace.focused {
-            Style::default().fg(palette.text).bg(palette.active_row_bg)
-        } else {
-            Style::default().fg(palette.overlay0)
-        };
-        put_text(
-            buffer,
-            rect.x,
-            rect.y,
-            rect.width.min(2),
-            &format!("{:<2}", index + 1),
-            number_style,
-        );
-        let status = workspace.agent_status;
-        put_text(
-            buffer,
-            rect.x.saturating_add(2),
-            rect.y,
-            rect.width.saturating_sub(2),
-            status_icon(status, config.status_indicators),
-            Style::default().fg(status_color(status, palette)),
-        );
-        hits.workspaces.push(WorkspaceHit {
-            rect,
-            endpoint_id: ClientEndpointId::Local,
-            workspace_id: workspace.workspace_id.clone(),
-            indented: false,
-            group_toggle: None,
-        });
-    }
-
-    if let Some(divider_y) = divider_y {
-        put_text(
-            buffer,
-            workspace_area.x,
-            divider_y,
-            workspace_area.width,
-            &"─".repeat(workspace_area.width as usize),
-            Style::default().fg(palette.surface_dim),
-        );
-    }
-
-    let detail_content = Rect::new(
-        detail_area.x,
-        detail_area.y,
-        detail_area.width,
-        detail_area.height.saturating_sub(1),
-    );
-    for (index, pane_id) in super::ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
-        .into_iter()
-        .take(detail_content.height as usize)
-        .enumerate()
-    {
-        let Some(agent) = snapshot
-            .agents
-            .iter()
-            .find(|agent| agent.pane_id == pane_id)
-        else {
-            continue;
-        };
-        let rect = Rect::new(
-            detail_content.x,
-            detail_content.y + index as u16,
-            detail_content.width,
-            1,
-        );
-        if agent.focused {
-            buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
-        }
-        put_text(
-            buffer,
-            rect.x,
-            rect.y,
-            rect.width.min(2),
-            &format!("{:<2}", index + 1),
-            Style::default().fg(if agent.focused {
-                palette.text
-            } else {
-                palette.overlay0
-            }),
-        );
-        put_text(
-            buffer,
-            rect.x.saturating_add(2),
-            rect.y,
-            rect.width.saturating_sub(2),
-            status_icon(agent.agent_status, config.status_indicators),
-            Style::default().fg(status_color(agent.agent_status, palette)),
-        );
-        hits.agents.push((rect, pane_id));
-    }
     let toggle_style = if super::super::global_menu::global_menu_attention(snapshot) {
         Style::default()
             .fg(palette.accent)
@@ -173,20 +46,18 @@ pub(crate) fn render_collapsed_sidebar(
     } else {
         Style::default().fg(palette.subtext0)
     };
-    hits.sidebar_toggle =
-        if area.is_empty() || area.width.saturating_sub(1) < pill_width(ICON_SIDEBAR_COLLAPSED) {
-            Rect::default()
-        } else {
-            put_pill(
-                buffer,
-                area.x,
-                area.y,
-                ICON_SIDEBAR_COLLAPSED,
-                toggle_style,
-                palette.surface1,
-                palette.sidebar_bg,
-            )
-        };
+    hits.sidebar_toggle = put_button(
+        buffer,
+        Rect::new(
+            area.x.saturating_add(1),
+            area.y,
+            ICON_BUTTON_WIDTH,
+            BUTTON_HEIGHT,
+        ),
+        ICON_SIDEBAR_COLLAPSED,
+        toggle_style,
+        palette.overlay0,
+    );
 }
 
 pub(crate) fn render_sidebar(
@@ -209,19 +80,28 @@ pub(crate) fn render_sidebar(
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
 
-    // Toolbar: sidebar toggle on the left, global menu on the right.
+    // Top bar: sidebar toggle on the left, global menu on the right. Right-hand
+    // buttons need room beside the toggle and the SPACES label.
     let button_style = Style::default().fg(palette.subtext0);
-    let buttons_right = workspace_area.right().saturating_sub(1);
-    hits.sidebar_toggle = put_pill(
+    let right_button_x = workspace_area
+        .right()
+        .saturating_sub(1)
+        .saturating_sub(ICON_BUTTON_WIDTH);
+    let show_right_buttons =
+        config.mouse_capture && workspace_area.width >= 2 * ICON_BUTTON_WIDTH + 3;
+    hits.sidebar_toggle = put_button(
         buffer,
-        workspace_area.x.saturating_add(1),
-        workspace_area.y,
+        Rect::new(
+            workspace_area.x.saturating_add(1),
+            workspace_area.y,
+            ICON_BUTTON_WIDTH,
+            BUTTON_HEIGHT,
+        ),
         ICON_SIDEBAR_EXPANDED,
         button_style,
-        palette.surface1,
-        palette.sidebar_bg,
+        palette.overlay0,
     );
-    if config.mouse_capture {
+    if show_right_buttons {
         let menu_style = if super::super::global_menu::global_menu_attention(snapshot) {
             Style::default()
                 .fg(palette.accent)
@@ -229,47 +109,50 @@ pub(crate) fn render_sidebar(
         } else {
             button_style
         };
-        hits.global_launcher = put_pill(
+        hits.global_launcher = put_button(
             buffer,
-            buttons_right.saturating_sub(pill_width(ICON_MENU)),
-            workspace_area.y,
+            Rect::new(right_button_x, workspace_area.y, ICON_BUTTON_WIDTH, BUTTON_HEIGHT),
             ICON_MENU,
             menu_style,
-            palette.surface1,
-            palette.sidebar_bg,
+            palette.overlay0,
         );
     }
 
-    let header_y = workspace_area.y.saturating_add(SIDEBAR_TOP_BAR_ROWS);
+    // Section header: the SPACES label beside the new-space button.
+    let header_y = workspace_area.y.saturating_add(BUTTON_HEIGHT);
     put_text(
         buffer,
         workspace_area.x.saturating_add(2),
-        header_y,
+        header_y.saturating_add(1),
         workspace_area.width.saturating_sub(2),
         "SPACES",
         Style::default()
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
     );
-    if config.mouse_capture {
-        hits.new_workspace = put_pill(
+    if show_right_buttons {
+        hits.new_workspace = put_button(
             buffer,
-            buttons_right.saturating_sub(pill_width(ICON_PLUS)),
-            header_y,
+            Rect::new(right_button_x, header_y, ICON_BUTTON_WIDTH, BUTTON_HEIGHT),
             ICON_PLUS,
             button_style,
-            palette.surface1,
-            palette.sidebar_bg,
+            palette.overlay0,
         );
     }
 
     let entries = workspace_entries(snapshot, state.collapsed_groups);
-    let body_top = SIDEBAR_TOP_BAR_ROWS + SPACES_HEADER_ROWS;
+    // Leave the row below the list free so the focused entry's border always fits.
     let body = Rect::new(
         workspace_area.x,
-        workspace_area.y.saturating_add(body_top),
+        workspace_area.y.saturating_add(SPACES_LIST_TOP),
         workspace_area.width,
-        workspace_area.height.saturating_sub(body_top),
+        workspace_area.height.saturating_sub(SPACES_LIST_TOP + 1),
+    );
+    let border_clip = Rect::new(
+        body.x,
+        body.y.saturating_sub(1),
+        body.width,
+        body.height.saturating_add(2),
     );
     hits.workspace_body = body;
     let row_heights = entries
@@ -334,8 +217,10 @@ pub(crate) fn render_sidebar(
         .saturating_sub(metrics.offset_from_bottom);
     let show_scrollbar = metrics.max_offset_from_bottom > 0 && body.width > 1;
     let content_width = body.width.saturating_sub(u16::from(show_scrollbar));
+    let first_visible = *state.workspace_scroll;
     let mut y = body.y;
-    for (entry_position, entry) in entries.iter().enumerate().skip(*state.workspace_scroll) {
+    let mut previous_gap = 0;
+    for (entry_position, entry) in entries.iter().enumerate().skip(first_visible) {
         let Some(workspace) = snapshot.workspaces.get(entry.index) else {
             continue;
         };
@@ -348,11 +233,18 @@ pub(crate) fn render_sidebar(
         let rect = Rect::new(body.x, y, content_width, row_height);
         let selected = state.selected_workspace_id == Some(workspace.workspace_id.as_str());
         let dragged = state.dragged_workspace_id == Some(workspace.workspace_id.as_str());
+        // The focused entry gets a full border when the rows around it are free;
+        // entries packed against a neighbour, like worktree children, keep the fill.
+        let bordered = workspace.focused
+            && (entry_position == first_visible || previous_gap > 0)
+            && entries
+                .get(entry_position + 1)
+                .is_none_or(|next| !next.indented && config.spaces.row_gap > 0);
         if selected {
             buffer.set_style(rect, Style::default().bg(palette.selection_bg));
         } else if dragged {
             buffer.set_style(rect, Style::default().bg(palette.surface1));
-        } else if workspace.focused {
+        } else if workspace.focused && !bordered {
             buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
         }
         render_workspace_rows(
@@ -366,8 +258,12 @@ pub(crate) fn render_sidebar(
             true,
             selected,
             dragged,
+            bordered,
             palette,
         );
+        if bordered {
+            put_focus_border(buffer, rect, border_clip, palette.accent);
+        }
         let group_toggle = parent_group_key(snapshot, entry.index).map(|key| {
             let rect = Rect::new(rect.right().saturating_sub(1), rect.y, 1, 1);
             put_text(
@@ -394,6 +290,7 @@ pub(crate) fn render_sidebar(
         let gap = entries
             .get(entry_position + 1)
             .map_or(0, |next| u16::from(!next.indented) * config.spaces.row_gap);
+        previous_gap = gap;
         y = y.saturating_add(row_height + gap);
     }
 
@@ -605,6 +502,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
     endpoint_active: bool,
     selected: bool,
     dragged: bool,
+    bordered: bool,
     palette: &Palette,
 ) {
     for (row_index, row) in rows.iter().enumerate() {
@@ -634,9 +532,9 @@ pub(in crate::client::shell) fn render_workspace_rows(
                 Style::default().fg(palette.overlay0),
             );
         } else if row_index == 0 {
-            x = x.saturating_add(2);
+            x = x.saturating_add(3);
         } else {
-            x = x.saturating_add(4);
+            x = x.saturating_add(6);
         }
         let highlighted = endpoint_active && workspace.focused || dragged;
         let workspace_style = Style::default()
@@ -668,10 +566,10 @@ pub(in crate::client::shell) fn render_workspace_rows(
             secondary_style,
             Style::default().fg(palette.overlay1),
             palette,
-            area.right().saturating_sub(2).saturating_sub(x) as usize,
+            area.right().saturating_sub(3).saturating_sub(x) as usize,
         );
         Paragraph::new(Line::from(spans)).render(
-            Rect::new(x, y, area.right().saturating_sub(2).saturating_sub(x), 1),
+            Rect::new(x, y, area.right().saturating_sub(3).saturating_sub(x), 1),
             buffer,
         );
     }
@@ -680,7 +578,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
         Some(palette.selection_bg)
     } else if dragged {
         Some(palette.surface1)
-    } else if endpoint_active && workspace.focused {
+    } else if endpoint_active && workspace.focused && !bordered {
         Some(palette.active_row_bg)
     } else {
         None
@@ -689,16 +587,6 @@ pub(in crate::client::shell) fn render_workspace_rows(
         for y in area.y..area.bottom() {
             for x in area.x..area.right() {
                 buffer[(x, y)].set_bg(background);
-            }
-        }
-        if !dragged {
-            let bar = if endpoint_active && workspace.focused {
-                palette.accent
-            } else {
-                palette.overlay1
-            };
-            for y in area.y..area.bottom() {
-                buffer[(area.x, y)].set_symbol(ACTIVE_ROW_BAR).set_fg(bar);
             }
         }
     }

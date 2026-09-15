@@ -7,7 +7,7 @@ pub(in crate::client::shell) mod sidebar;
 #[path = "../shell/tabs.rs"]
 mod tabs;
 
-pub(super) use super::agent_sidebar::{ordered_agent_pane_ids, render_agent_panel};
+pub(super) use super::agent_sidebar::render_agent_panel;
 pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_rows;
 pub(super) use overlays::{render_client_overlay, render_context_menu, render_global_menu};
 pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar, workspace_entries};
@@ -20,10 +20,17 @@ pub(in crate::client::shell) fn render_sidebar_background(
 ) {
     buffer.set_style(area, Style::default().bg(palette.sidebar_bg));
     let separator_x = area.right().saturating_sub(1);
+    // Draw the divider at the left edge of its cell and give the rest of the cell the
+    // pane background, so the sidebar ends exactly at the line. A centered "│" left
+    // half a cell of sidebar beyond it, making right-hand margins wider than the left.
     for y in area.y..area.bottom() {
         if let Some(cell) = buffer.cell_mut((separator_x, y)) {
-            cell.set_symbol("│");
-            cell.set_style(Style::default().fg(palette.surface_dim));
+            cell.set_symbol("▏");
+            cell.set_style(
+                Style::default()
+                    .fg(palette.surface_dim)
+                    .bg(ratatui::style::Color::Reset),
+            );
         }
     }
 }
@@ -266,14 +273,7 @@ pub(super) fn render_shell(
                 );
             }
         } else if state.sidebar_collapsed {
-            render_collapsed_sidebar(
-                buffer,
-                layout.sidebar,
-                snapshot,
-                config,
-                state.selected_workspace_id,
-                &mut hits,
-            );
+            render_collapsed_sidebar(buffer, layout.sidebar, snapshot, config, &mut hits);
         } else {
             render_sidebar(
                 buffer,
@@ -352,37 +352,98 @@ pub(super) fn display_width(text: &str) -> u16 {
     UnicodeWidthStr::width(text).min(u16::MAX as usize) as u16
 }
 
-// Nerd Font glyphs used by the sidebar's rounded buttons and active-row marker.
-pub(in crate::client::shell) const PILL_CAP_LEFT: &str = "\u{e0b6}";
-pub(in crate::client::shell) const PILL_CAP_RIGHT: &str = "\u{e0b4}";
+// Nerd Font glyphs used by the sidebar's buttons.
 pub(in crate::client::shell) const ICON_SIDEBAR_EXPANDED: &str = "\u{ebf3}";
 pub(in crate::client::shell) const ICON_SIDEBAR_COLLAPSED: &str = "\u{ec02}";
 pub(in crate::client::shell) const ICON_MENU: &str = "\u{f0c9}";
 pub(in crate::client::shell) const ICON_PLUS: &str = "\u{f067}";
-pub(in crate::client::shell) const ACTIVE_ROW_BAR: &str = "\u{258e}";
+pub(in crate::client::shell) const ICON_CARET: &str = "\u{f0d7}";
 
-/// Width of a rounded button around `label`, caps included.
-pub(in crate::client::shell) fn pill_width(label: &str) -> u16 {
-    display_width(label).saturating_add(2)
+/// Rows taken by an outlined sidebar button.
+pub(in crate::client::shell) const BUTTON_HEIGHT: u16 = 3;
+/// Width that makes an icon button look square despite tall terminal cells.
+pub(in crate::client::shell) const ICON_BUTTON_WIDTH: u16 = 7;
+
+/// Width of a button around `label`: one space and one border on each side,
+/// never narrower than a square icon button.
+pub(in crate::client::shell) fn button_width(label: &str) -> u16 {
+    display_width(label)
+        .saturating_add(4)
+        .max(ICON_BUTTON_WIDTH)
 }
 
-/// Draws `label` as a rounded button and returns its clickable area.
-pub(in crate::client::shell) fn put_pill(
+/// Draws `label` centered in a rounded outline filling `area` and returns the
+/// clickable area, or an empty rect when the button does not fit.
+pub(in crate::client::shell) fn put_button(
     buffer: &mut Buffer,
-    x: u16,
-    y: u16,
+    area: Rect,
     label: &str,
     style: Style,
-    fill: ratatui::style::Color,
-    outer: ratatui::style::Color,
+    border: ratatui::style::Color,
 ) -> Rect {
-    let width = pill_width(label);
-    if x.saturating_add(width) > buffer.area.right() || y >= buffer.area.bottom() {
+    let clip = buffer.area;
+    if area.width < 3
+        || area.height < BUTTON_HEIGHT
+        || area.right() > clip.right()
+        || area.bottom() > clip.bottom()
+    {
         return Rect::default();
     }
-    let cap = Style::default().fg(fill).bg(outer);
-    put_text(buffer, x, y, 1, PILL_CAP_LEFT, cap);
-    put_text(buffer, x + 1, y, width - 2, label, style.bg(fill));
-    put_text(buffer, x + width - 1, y, 1, PILL_CAP_RIGHT, cap);
-    Rect::new(x, y, width, 1)
+    put_rounded_box(buffer, area, clip, Style::default().fg(border));
+    let label_width = display_width(label).min(area.width - 2);
+    let label_x = area.x + (area.width - label_width) / 2;
+    let label_y = area.y + area.height / 2;
+    put_text(buffer, label_x, label_y, label_width, label, style);
+    // Ghostty lets a Nerd Font icon followed by a space spread over two cells and
+    // left-aligns it there, pushing it off the button's center. A following no-break
+    // space is not whitespace to Ghostty, so the icon stays centered in one cell.
+    let ends_with_icon = label
+        .chars()
+        .last()
+        .is_some_and(|c| matches!(c, '\u{e000}'..='\u{f8ff}' | '\u{f0000}'..='\u{ffffd}'));
+    let after_label = label_x + label_width;
+    if ends_with_icon && after_label < area.right() - 1 {
+        put_text(buffer, after_label, label_y, 1, "\u{a0}", style);
+    }
+    area
+}
+
+/// Draws a rounded border around `rect`, inset one column from each side, on the
+/// rows directly above and below it. Rows outside `clip` are left untouched.
+pub(in crate::client::shell) fn put_focus_border(
+    buffer: &mut Buffer,
+    rect: Rect,
+    clip: Rect,
+    color: ratatui::style::Color,
+) {
+    if rect.y == 0 || rect.width < 5 {
+        return;
+    }
+    let outline = Rect::new(rect.x + 1, rect.y - 1, rect.width - 2, rect.height + 2);
+    put_rounded_box(buffer, outline, clip, Style::default().fg(color));
+}
+
+/// Draws a rounded outline along the edges of `outline`, skipping rows outside
+/// `clip`. Buttons and the focus border share it so every corner matches.
+fn put_rounded_box(buffer: &mut Buffer, outline: Rect, clip: Rect, style: Style) {
+    if outline.width < 2 || outline.height < 2 {
+        return;
+    }
+    let visible = |y: u16| y >= clip.y && y < clip.bottom();
+    let right = outline.right() - 1;
+    let bottom = outline.bottom() - 1;
+    let rule = "─".repeat(usize::from(outline.width - 2));
+    for (y, open, close) in [(outline.y, "╭", "╮"), (bottom, "╰", "╯")] {
+        if visible(y) {
+            put_text(buffer, outline.x, y, 1, open, style);
+            put_text(buffer, outline.x + 1, y, outline.width - 2, &rule, style);
+            put_text(buffer, right, y, 1, close, style);
+        }
+    }
+    for y in outline.y + 1..bottom {
+        if visible(y) {
+            put_text(buffer, outline.x, y, 1, "│", style);
+            put_text(buffer, right, y, 1, "│", style);
+        }
+    }
 }

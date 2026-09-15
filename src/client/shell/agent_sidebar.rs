@@ -87,6 +87,10 @@ pub(super) fn render_agent_panel(
     );
 }
 
+/// Rows above the agent list: the AGENTS header, a spacer, and the row the
+/// focused agent's border draws into.
+const AGENT_LIST_TOP: u16 = super::render::BUTTON_HEIGHT + 2;
+
 pub(super) fn render_agent_panel_header(
     buffer: &mut Buffer,
     area: Rect,
@@ -94,19 +98,7 @@ pub(super) fn render_agent_panel_header(
     config: &ClientShellConfig,
     hits: &mut ShellHitMap,
 ) -> bool {
-    if area.height == 0 {
-        return false;
-    }
-    let rule_width = area.width.saturating_sub(2);
-    put_text(
-        buffer,
-        area.x.saturating_add(1),
-        area.y,
-        rule_width,
-        &"─".repeat(rule_width as usize),
-        Style::default().fg(config.palette.surface_dim),
-    );
-    if area.height < 2 {
+    if area.height < super::render::BUTTON_HEIGHT {
         return false;
     }
     put_text(
@@ -123,27 +115,33 @@ pub(super) fn render_agent_panel_header(
         crate::config::AgentPanelSortConfig::Spaces => "grouped",
         crate::config::AgentPanelSortConfig::Priority => "priority",
     });
-    let padded_label = format!(" {sort_label} ");
-    let pill_label = if area.width >= super::render::pill_width(&padded_label) + 10 {
-        padded_label.as_str()
+    let button_label = if agent_view_label.is_some() {
+        sort_label.to_string()
     } else {
-        sort_label
+        format!("{sort_label} {}", super::render::ICON_CARET)
     };
-    let sort_rect = super::render::put_pill(
-        buffer,
-        area.right()
-            .saturating_sub(1)
-            .saturating_sub(super::render::pill_width(pill_label)),
-        area.y + 1,
-        pill_label,
-        Style::default().fg(if agent_view_label.is_some() {
-            config.palette.accent
-        } else {
-            config.palette.overlay1
-        }),
-        config.palette.surface0,
-        config.palette.sidebar_bg,
-    );
+    let button_width = super::render::button_width(&button_label);
+    // Narrow sidebars drop the sort button rather than covering the AGENTS label.
+    let sort_rect = if area.width >= button_width + 10 {
+        super::render::put_button(
+            buffer,
+            Rect::new(
+                area.right().saturating_sub(1).saturating_sub(button_width),
+                area.y,
+                button_width,
+                super::render::BUTTON_HEIGHT,
+            ),
+            &button_label,
+            Style::default().fg(if agent_view_label.is_some() {
+                config.palette.accent
+            } else {
+                config.palette.subtext0
+            }),
+            config.palette.overlay0,
+        )
+    } else {
+        Rect::default()
+    };
     hits.agent_sort_toggle = if config.mouse_capture && agent_view_label.is_none() {
         sort_rect
     } else {
@@ -163,11 +161,12 @@ pub(super) fn render_agent_list<T>(
     row_lines: impl Fn(&T) -> usize,
     mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
 ) {
+    // Keep a free row under the list so the focused agent's border always fits.
     let body = Rect::new(
         area.x,
-        area.y.saturating_add(3),
+        area.y.saturating_add(AGENT_LIST_TOP),
         area.width,
-        area.height.saturating_sub(3),
+        area.height.saturating_sub(AGENT_LIST_TOP + 1),
     );
     hits.agent_body = body;
     if body.is_empty() || rows.is_empty() {
@@ -319,7 +318,9 @@ pub(super) fn render_agent_row(
     config: &ClientShellConfig,
 ) {
     let palette = &config.palette;
-    let row_style = if row.focused {
+    // Focused agents get a full border when the row gap leaves room for it.
+    let bordered = row.focused && config.agents.row_gap > 0;
+    let row_style = if row.focused && !bordered {
         Style::default().bg(palette.active_row_bg)
     } else {
         Style::default()
@@ -356,7 +357,7 @@ pub(super) fn render_agent_row(
         row.rows.clone()
     };
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
-        let indent = if index == 0 { 2 } else { 4 };
+        let indent = if index == 0 { 3 } else { 6 };
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
         spans.extend(crate::ui::resolved_token_spans(
             tokens,
@@ -366,22 +367,16 @@ pub(super) fn render_agent_row(
             secondary,
             secondary,
             palette,
-            rect.width.saturating_sub(indent as u16) as usize,
+            rect.width.saturating_sub(indent as u16 + 3) as usize,
         ));
-        let line = Rect::new(rect.x, rect.y + index as u16, rect.width, 1);
-        Paragraph::new(Line::from(spans))
-            .style(row_style)
-            .render(line, buffer);
-        if row.focused {
-            put_text(
-                buffer,
-                line.x,
-                line.y,
-                1,
-                super::render::ACTIVE_ROW_BAR,
-                row_style.fg(palette.accent),
-            );
-        }
+        Paragraph::new(Line::from(spans)).style(row_style).render(
+            Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
+            buffer,
+        );
+    }
+    if bordered {
+        let clip = buffer.area;
+        super::render::put_focus_border(buffer, rect, clip, palette.accent);
     }
 }
 

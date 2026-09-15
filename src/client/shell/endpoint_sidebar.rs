@@ -309,6 +309,7 @@ pub(super) fn render_expanded(
                     endpoint_active,
                     false,
                     false,
+                    false,
                     palette,
                 );
                 if endpoint.status != ClientEndpointStatus::Online {
