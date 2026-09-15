@@ -31,9 +31,9 @@ installed macOS 15 SDK (override with `HERDR_MACOS_SDK`).
 ## Moving to a new herdr release
 
     git fetch upstream --tags
-    git rebase --onto vX.Y.Z v0.9.0 carbon-sidebar
+    git rebase --onto vX.Y.Z v0.9.0 main
     carbon/build.sh --install
-    git push --force origin carbon-sidebar:main
+    git push --force origin main
 
 `upstream` is herdr's own repository and `origin` is this fork.
 
