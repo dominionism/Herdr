@@ -2,15 +2,20 @@
 
 A personal patch on herdr that restyles the left sidebar:
 
-- A toolbar row with rounded buttons: sidebar toggle top-left, menu top-right.
+- A top bar with outlined buttons: sidebar toggle top-left, menu top-right.
 - A `SPACES` header with a `+` new-space button, replacing the old `new … menu` footer.
-- An `AGENTS` header with a `grouped` / `priority` sort pill.
-- A steel accent bar on the focused space and agent rows.
-- The collapsed rail keeps its expand button in the same top-left spot.
+- An `AGENTS` header with a `grouped` / `priority` sort button.
+- Nerd Font state icons instead of dots, with two spaces before each label.
+- A rounded accent border around the focused space and agent, drawn in the gap rows so
+  the list never shifts. Entries packed against a neighbour keep a background fill.
+- Collapsing the sidebar leaves only the expand button, at the same size and position.
 
-Colors come from `[theme.custom]` in `~/.config/herdr/config.toml`: buttons use
-`surface1`, the sort pill `surface0`, and the accent bar `accent`. Icons are Nerd Font
-glyphs, which Ghostty renders without a patched font.
+Buttons and the focus border are drawn by one rounded-box helper, so every corner has
+the same radius. Colors come from `[theme.custom]` in `~/.config/herdr/config.toml`:
+button outlines use `overlay0` like unfocused pane frames, and the focus border uses
+`accent`. Icons are Nerd Font glyphs, which Ghostty renders without a patched font. Each button
+puts a no-break space after its icon: Ghostty spreads an icon followed by a plain space
+over two cells and left-aligns it there, which pushes it off the button's center.
 
 ## Build and install
 
@@ -25,9 +30,12 @@ installed macOS 15 SDK (override with `HERDR_MACOS_SDK`).
 
 ## Moving to a new herdr release
 
-    git fetch --tags
+    git fetch upstream --tags
     git rebase --onto vX.Y.Z v0.9.0 carbon-sidebar
     carbon/build.sh --install
+    git push --force origin carbon-sidebar:main
+
+`upstream` is herdr's own repository and `origin` is this fork.
 
 Check `vendor/libghostty-vt/build.zig.zon` for `minimum_zig_version` first and update
 `ZIG_VERSION` in `carbon/build.sh` if it changed. Homebrew's herdr is unlinked and
